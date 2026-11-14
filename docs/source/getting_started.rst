@@ -81,6 +81,8 @@ a name that will be shown in the web interface. For example:
    Camera 1 = ffmpeg:device?video=Generic Webcam#video=h264
    Camera 2 = ffmpeg:device?video=USB Camera#video=h264
 
+If you have multiple webcameras with the same name on Windows, you'll want to rename them via the registry.
+
 Updating
 ~~~~~~~~
 
