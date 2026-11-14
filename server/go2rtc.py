@@ -86,9 +86,9 @@ class Go2RTC:
                     device_id = None
 
                 if device_id:
-                    device_url = f"ffmpeg:device?video_device_id={parse.quote(device_id, safe=':')}"
+                    device_url = f"ffmpeg:device?video_device_id={device_id}"
                 else:
-                    device_url = f"ffmpeg:device?{parse.urlencode({'video': name})}"
+                    device_url = f"ffmpeg:device?video={name}"
 
                 devices.append(
                     {
@@ -147,7 +147,7 @@ class Go2RTC:
             try:
                 devices = self.get_devices("http://127.0.0.1:1984/api/ffmpeg/devices")
                 for device in devices:
-                    print(f" * Found go2rtc video device {device['name']} - {device['url']}")
+                    print(f" * Found go2rtc video device - {device['name']} - {device['url']}")
                 return
             except Exception:
                 time.sleep(0.2)

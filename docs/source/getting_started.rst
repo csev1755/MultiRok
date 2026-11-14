@@ -68,8 +68,8 @@ and start the server once to see which video devices were detected:
 
 .. code-block::
 
-   * Found go2rtc video device 0 - Generic Webcam - ffmpeg:device?video=0#video=h264
-   * Found go2rtc video device 1 - USB Camera - ffmpeg:device?video=1#video=h264
+   * Found go2rtc video device - Generic Webcam - ffmpeg:device?video=Generic Webcam#video=h264
+   * Found go2rtc video device - USB Camera - ffmpeg:device?video=USB Camera#video=h264
 
 Copy the text after the device name (starting with ``ffmpeg:``) into
 the ``[video_streams]`` section for each camera you want to use along with
@@ -78,8 +78,8 @@ a name that will be shown in the web interface. For example:
 .. code-block:: ini
 
    [video_streams]
-   Camera 1 = ffmpeg:device?video=0#video=h264
-   Camera 2 = ffmpeg:device?video=1#video=h264
+   Camera 1 = ffmpeg:device?video=Generic Webcam#video=h264
+   Camera 2 = ffmpeg:device?video=USB Camera#video=h264
 
 Updating
 ~~~~~~~~
