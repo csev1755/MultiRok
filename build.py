@@ -13,7 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-GO2RTC_VERSION = "1.9.14"
+GO2RTC_VERSION = "806362f"
 VERSION_MARKER = b'version_string = "MultiRok (dev)"'
 
 SPHINXBUILD = "uv run sphinx-build"
@@ -65,7 +65,7 @@ def download_binaries(go2rtc_arch):
         temporary_path = Path(temporary_directory)
         go2rtc_archive = temporary_path / "go2rtc.zip"
         download(
-            f"https://github.com/AlexxIT/go2rtc/releases/download/v{GO2RTC_VERSION}/go2rtc_{go2rtc_arch}.zip",
+            f"https://github.com/csev1755/go2rtc/releases/download/{GO2RTC_VERSION}/go2rtc_{go2rtc_arch}.zip",
             go2rtc_archive,
         )
         go2rtc_member = "go2rtc.exe" if go2rtc_arch == "win64" else "go2rtc"
@@ -77,7 +77,7 @@ def download_binaries(go2rtc_arch):
             ffmpeg_member = "ffmpeg.exe"
         else:
             architecture = go2rtc_arch.removeprefix("mac_")
-            ffmpeg_url = f"https://ffmpeg.martin-riedl.de/redirect/latest/macos/{architecture}/release/ffmpeg.zip"
+            ffmpeg_url = f"https://ffmpeg.martin-riedl.de/redirect/latest/macos/{architecture}/snapshot/ffmpeg.zip"
             ffmpeg_member = "ffmpeg"
         download(ffmpeg_url, ffmpeg_archive)
         extract_binary(ffmpeg_archive, ffmpeg_path, ffmpeg_member)
