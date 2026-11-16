@@ -1,5 +1,7 @@
 import serial
 import serial.tools.list_ports
+import threading
+import time
 
 from devices.vehicle import Vehicle
 
@@ -13,6 +15,7 @@ class SmartPortSerial(Vehicle):
 
     type = "smart_port_serial"
     serial = None
+    _receive_thread = None
 
     sp_status = 0  # 0 = SP Not Connected, 1 = SP Connected
     sp_player_ids = []  # [V1, V2, V3, V4, P1, P2, P3, P4, D1, D2, D3, D4]
@@ -31,7 +34,7 @@ class SmartPortSerial(Vehicle):
                 if self.config["serial_port"] == "auto":
                     device_found = False
                     for port in serial.tools.list_ports.comports():
-                        if port.vid in [0x2341, 0x1A86, 0x239A, 0x1B4F, 0x303A]:  # Common Arduino and ESP32 VIDs.
+                        if port.vid in [0x2341, 0x1A86, 0x239A, 0x1B4F, 0x303A]:  # Common Arduino and ESP32 VIDs
                             SmartPortSerial.serial = serial.Serial(port.device, 1000000)
                             print(f" * Auto detected and connected to Smart Port serial device at '{port.device}'")
                             device_found = True
@@ -42,7 +45,15 @@ class SmartPortSerial(Vehicle):
                 else:
                     SmartPortSerial.serial = serial.Serial(self.config["serial_port"], 1000000)
                     print(f" * Connected to Smart Port serial device at '{self.config['serial_port']}'")
+
+                time.sleep(3)  # Give Time for Arduino Devices to Perform Automatic Reset
+
+                if SmartPortSerial._receive_thread is None or not SmartPortSerial._receive_thread.is_alive():
+                    SmartPortSerial._receive_thread = threading.Thread(target=self._receive_packet_loop, daemon=True)
+                    SmartPortSerial._receive_thread.start()
+
                 self.send_configuration()
+
                 return True
             except serial.SerialException as e:
                 self.logger.error(f"Cannot connect to Smart Port serial device at '{self.config['serial_port']}'")
@@ -53,32 +64,20 @@ class SmartPortSerial(Vehicle):
 
     def send_configuration(self):
         """
-        Sends configuration bytes to the serial device.
+        Sends configuration bytes to the serial device using send_packet().
         """
-        if not self.connect_serial():
-            return
-
-        try:
-            if SmartPortSerial.serial is not None:
-                packet = bytearray(
-                    [
-                        253,
-                        int(self.play_manager.allow_share),
-                        int(sum(1 for v in self.play_manager.vehicles.values() if v.type == self.type) > 8),
-                        int(self.config.getboolean("enable_wifi")),
-                        0,  # Reserved for future use.
-                        255,
-                    ]
-                )
-                SmartPortSerial.serial.write(packet)
-                self.logger.debug(f"SmartPortSerial - Sent Config: {packet}")
-            else:
-                self.logger.error("Connection to Smart Port serial device is not established")
-
-        except serial.SerialException as e:
-            self.logger.debug(e)
-            self.logger.error(f"Cannot connect to Smart Port serial device at '{self.config['serial_port']}'")
-            SmartPortSerial.serial = None
+        packet = bytearray(
+            [
+                253,
+                int(self.play_manager.allow_share),
+                int(sum(1 for v in self.play_manager.vehicles.values() if v.type == self.type) > 8),
+                int(self.config.getboolean("enable_wifi")),
+                0,  # Reserved for future use.
+                255,
+            ]
+        )
+        self.send_packet(packet)
+        self.logger.debug("SmartPortSerial - Sent Config")
 
     def encode_player_state(self, player):
         """
@@ -112,8 +111,7 @@ class SmartPortSerial(Vehicle):
 
     def control(self, player, play_manager):
         """
-        Constructs and transmits a packet containing the state of all players
-        to the serial device and receives data representing the command deck's state.
+        Constructs and sends a packet containing the state of all players to the serial device.
         """
         available_controllers = 12 - SmartPortSerial.sp_player_ids.count(1)
         packet = bytearray([254])
@@ -125,11 +123,11 @@ class SmartPortSerial(Vehicle):
                 packet.extend([p_id, v_sel, byte1, byte2])
                 available_controllers -= 1
         packet.append(255)
-        self.send_and_receive_packet(packet)
+        self.send_packet(packet)
 
-    def send_and_receive_packet(self, packet):
+    def send_packet(self, packet):
         """
-        Sends a packet via serial and processes any incoming response.
+        Sends a packet via serial.
 
         Args:
             packet (bytearray): The packet to transmit.
@@ -141,29 +139,6 @@ class SmartPortSerial(Vehicle):
             if SmartPortSerial.serial is not None:
                 SmartPortSerial.serial.write(packet)
                 self.logger.debug(f"SmartPortSerial - Sent: {packet}")
-
-                if SmartPortSerial.serial.in_waiting >= 27:
-                    raw = SmartPortSerial.serial.read(SmartPortSerial.serial.in_waiting)
-                    start = raw.rfind(254)
-
-                    if start != -1 and len(raw) >= start + 27 and raw[start + 26] == 255:
-                        frame = raw[start : start + 27]
-
-                        SmartPortSerial.sp_status = frame[1]
-                        if not SmartPortSerial.sp_status:
-                            self.logger.warning("SmartPortSerial - Smart Port Connection to Command Deck Not Established")
-
-                        SmartPortSerial.sp_player_ids = [int(x) for x in frame[2:14]]
-                        self.logger.debug(f"SmartPortSerial Player IDs - {SmartPortSerial.sp_player_ids}")
-                        SmartPortSerial.sp_selects = [None if x == 15 else x + 1 for x in frame[14:26]]
-                        self.logger.debug(f"SmartPortSerial Selections - {SmartPortSerial.sp_selects}")
-
-                    else:
-                        self.logger.debug(f"SmartPortSerial - Invalid Response: {raw}")
-                        self.logger.warning("SmartPortSerial - Smart Port Communication Error")
-
-                else:
-                    self.logger.debug("SmartPortSerial - No Response Received")
             else:
                 self.logger.error("Connection to Smart Port serial device is not established")
 
@@ -171,3 +146,33 @@ class SmartPortSerial(Vehicle):
             self.logger.debug(e)
             self.logger.error(f"Cannot connect to Smart Port serial device at '{self.config['serial_port']}'")
             SmartPortSerial.serial = None
+
+    def _receive_packet_loop(self):
+        """
+        Continuously receives response packets from serial in a background thread.
+        """
+        while SmartPortSerial.serial is not None:
+            try:
+                if SmartPortSerial.serial.in_waiting >= 27:
+                    raw = SmartPortSerial.serial.read(SmartPortSerial.serial.in_waiting)
+                    start = raw.rfind(254)
+
+                    if start != -1 and len(raw) >= start + 27 and raw[start + 26] == 255:
+                        frame = raw[start : start + 27]
+                        SmartPortSerial.sp_status = frame[1]
+                        if not SmartPortSerial.sp_status:
+                            self.logger.warning("SmartPortSerial - Smart Port Connection to Command Deck Not Established")
+                        SmartPortSerial.sp_player_ids = list(frame[2:14])
+                        self.logger.debug(f"SmartPortSerial Player IDs - {SmartPortSerial.sp_player_ids}")
+                        SmartPortSerial.sp_selects = [None if x == 15 else x + 1 for x in frame[14:26]]
+                        self.logger.debug(f"SmartPortSerial Selections - {SmartPortSerial.sp_selects}")
+                    else:
+                        self.logger.debug(f"SmartPortSerial - Invalid Response: {raw}")
+                        self.logger.warning("SmartPortSerial - Smart Port Communication Error")
+
+            except serial.SerialException as e:
+                self.logger.debug(e)
+                self.logger.error(f"Cannot connect to Smart Port serial device at '{self.config['serial_port']}'")
+                SmartPortSerial.serial = None
+
+            time.sleep(0.01)
