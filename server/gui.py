@@ -4,8 +4,8 @@ import os
 import queue
 import time
 
-from PyQt6.QtCore import QTimer
-from PyQt6.QtGui import QIcon, QColor, QBrush
+from PyQt6.QtCore import QEvent, QTimer
+from PyQt6.QtGui import QBrush, QColor, QIcon, QPalette
 from PyQt6.QtWidgets import QGroupBox, QHeaderView, QLabel, QMainWindow, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
 
 
@@ -39,12 +39,20 @@ class MultiRokGUI(QMainWindow):
         bundle_dir (str): Program root directory for serving favicon.
     """
 
-    LOG_COLORS = {
-        "DEBUG": QColor("#888888"),
+    LOG_COLORS_DARK = {
+        "DEBUG": QColor("#009DFF"),
         "INFO": QColor("#FFFFFF"),
         "WARNING": QColor("#FFF000"),
-        "ERROR": QColor("#FF5555"),
-        "CRITICAL": QColor("#FF0000"),
+        "ERROR": QColor("#FF0000"),
+        "CRITICAL": QColor("#B00000"),
+    }
+
+    LOG_COLORS_LIGHT = {
+        "DEBUG": QColor("#003CFF"),
+        "INFO": QColor("#000000"),
+        "WARNING": QColor("#BA7C00"),
+        "ERROR": QColor("#FF0000"),
+        "CRITICAL": QColor("#B00000"),
     }
 
     def __init__(self, play_manager, go2rtc=None, bundle_dir="."):
@@ -93,9 +101,9 @@ class MultiRokGUI(QMainWindow):
 
         player_list_tree_header = self.player_list_tree.header()
         if player_list_tree_header:
-            player_list_tree_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+            player_list_tree_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
             player_list_tree_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
-            player_list_tree_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+            player_list_tree_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
             player_list_tree_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
 
         self.player_list_tree.setColumnWidth(0, 65)
@@ -117,8 +125,8 @@ class MultiRokGUI(QMainWindow):
 
         log_tree_header = self.log_tree.header()
         if log_tree_header:
-            log_tree_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-            log_tree_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+            log_tree_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+            log_tree_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
             log_tree_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
             log_tree_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
 
@@ -131,6 +139,7 @@ class MultiRokGUI(QMainWindow):
 
         # Logging Handler Setup
         self.log_handler = GUILogHandler()
+        self.log_colors = self._get_log_colors()
 
         # Track start time for uptime calculation
         self.start_time = time.time()
@@ -143,6 +152,29 @@ class MultiRokGUI(QMainWindow):
         self.log_timer = QTimer(self)
         self.log_timer.timeout.connect(self.update_logs)
         self.log_timer.start(100)
+
+    def changeEvent(self, event):
+        """
+        Qt built-in event handler called whenever changes occur to widget.
+        """
+        if event.type() == QEvent.Type.PaletteChange:
+            # Refreshes the colors of logging items in the level column upon theme change.
+            self.log_colors = self._get_log_colors()
+            for item_index in range(self.log_tree.topLevelItemCount()):
+                log_item = self.log_tree.topLevelItem(item_index)
+                if log_item:
+                    level = log_item.text(1)
+                    color = self.log_colors.get(level, self.log_colors.get("INFO"))
+                    log_item.setForeground(1, QBrush(color))
+
+        super().changeEvent(event)
+
+    def _get_log_colors(self):
+        """
+        Determines whether the current palette is dark or light based on background lightness.
+        """
+        is_dark = self.palette().color(QPalette.ColorRole.Base).lightness() < 128
+        return self.LOG_COLORS_DARK if is_dark else self.LOG_COLORS_LIGHT
 
     def update_gui(self):
         """
@@ -199,11 +231,8 @@ class MultiRokGUI(QMainWindow):
         colored_new_logs = []
         for log_entry in new_logs:
             item = QTreeWidgetItem(log_entry)
-            item.setForeground(0, QBrush(QColor("#888888")))
-            color = self.LOG_COLORS.get(log_entry[1], QColor("#FFFFFF"))
-            brush = QBrush(color)
-            for col in (1, 2, 3):
-                item.setForeground(col, brush)
+            color = self.log_colors.get(log_entry[1], self.log_colors.get("INFO"))
+            item.setForeground(1, QBrush(color))
             colored_new_logs.append(item)
 
         self.log_tree.addTopLevelItems(colored_new_logs)
