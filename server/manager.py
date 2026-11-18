@@ -52,62 +52,45 @@ class PlayManager:
         for player_id in range(1, self.max_player_count + 1):
             self.players[player_id] = Player(self, player_id, self.logger)
 
-    def player_join(self, socket_id):
+    def player_join(self):
         """
-        Assigns an available Player object to a client session.
-
-        Args:
-            socket_id (str): Socket.IO session identifier.
+        Assigns an available Player object to a client.
 
         Returns:
             Player or None: The assigned Player object.
         """
         for player in self.players.values():
-            if player.socket_id is None:
-                player.socket_id = socket_id
+            if not player.active:
+                player.active = True
                 player.selection = None
-                self.logger.info(f"Assigned Player object {player.player_id} to player {socket_id}")
+                self.logger.info(f"Assigned Player object {player.player_id}")
                 return player
-        self.logger.warning(f"No Player object available for player {socket_id}")
+        self.logger.warning("No Player object available")
         return None
 
-    def player_quit(self, socket_id):
+    def player_quit(self, player_id):
         """
-        Releases the Player object associated with a client session.
+        Releases the Player object associated with a client.
 
         Args:
-            socket_id (str): Socket.IO session identifier.
+            player_id (int): Player identifier.
 
         Returns:
             Player or None: The released Player object.
         """
-        for player in self.players.values():
-            if player.socket_id == socket_id:
-                old_vehicle = self.get_vehicle_from_id(player.selection)
-                player.socket_id = None
-                player.player_name = None
-                player.selection = None
-                player.buttons = set()
-                if old_vehicle:
-                    old_vehicle.control(player, self)
-                self.logger.info(f"Released Player object {player.player_id} from player {socket_id}")
-                return player
-        return None
+        player = self.players.get(player_id)
+        if player is None or not player.active:
+            return None
 
-    def get_player_from_socket_id(self, socket_id):
-        """
-        Retrieves the Player object associated with a client session.
-
-        Args:
-            socket_id (str): Socket.IO session identifier.
-
-        Returns:
-            Player or None: The matching Player object.
-        """
-        for player in self.players.values():
-            if player.socket_id == socket_id:
-                return player
-        return None
+        old_vehicle = self.get_vehicle_from_id(player.selection)
+        player.active = False
+        player.player_name = None
+        player.selection = None
+        player.buttons = set()
+        if old_vehicle:
+            old_vehicle.control(player, self)
+        self.logger.info(f"Released Player object {player.player_id}")
+        return player
 
     def get_vehicle_from_id(self, vehicle_id=None):
         """
@@ -137,7 +120,7 @@ class PlayManager:
         players = []
 
         for player in self.players.values():
-            if player.socket_id:
+            if player.active:
                 if player.selection and time.time() - player.last_activity > self.config.getint("webserver", "player_timeout"):
                     player.selection = None
 

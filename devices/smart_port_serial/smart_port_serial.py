@@ -118,7 +118,7 @@ class SmartPortSerial(Vehicle):
         available_controllers = 12 - SmartPortSerial.sp_player_ids.count(1)
         packet = bytearray([254])
         for p in play_manager.players.values():
-            if p.socket_id and available_controllers and p.selection and play_manager.get_vehicle_from_id(p.selection).type == self.type:
+            if p.active and available_controllers and p.selection and play_manager.get_vehicle_from_id(p.selection).type == self.type:
                 p_id = p.player_id + 1 or 0
                 v_sel = p.selection - 1
                 byte1, byte2 = self.encode_player_state(p) if p.selection is not None else (0, 0)

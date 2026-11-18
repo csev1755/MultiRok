@@ -18,6 +18,7 @@ def init_webserver(bundle_dir, config, play_manager, server_name):
 
     # Store active WebSocket connections
     app["websockets"] = set()
+    players_by_connection = {}
 
     @aiohttp_jinja2.template("player.html")
     async def index(request):
@@ -70,46 +71,76 @@ def init_webserver(bundle_dir, config, play_manager, server_name):
             except Exception:
                 app["websockets"].remove(ws)
 
-    async def handle_connect(sid, ws):
+    async def connect_player(sid, ws, data):
         """
-        Directs the play manager to handle the connected player and broadcasts
-        the updated player list to all clients.
+        Assigns a player to a WebSocket when requested by the client.
         """
-        player = play_manager.player_join(sid)
+        player = players_by_connection.get(sid)
+        if player is None:
+            player = play_manager.player_join()
+            if player is None:
+                await ws.send_str(json.dumps({"error": "no_player_slots"}))
+                return
+            players_by_connection[sid] = player
 
-        if player:
-            await ws.send_str(json.dumps({"player_id": player.player_id}))
+        player_name = data.get("player_name")
+        if isinstance(player_name, str) and len(player_name) <= max_player_name_length:
+            player.player_name = player_name
+
+        await ws.send_str(json.dumps({"player_id": player.player_id}))
         await broadcast_state("players", play_manager.get_player_info())
 
-    async def handle_disconnect(sid):
+    async def release_player(sid):
         """
-        Directs the play manager to handle the disconnected player and broadcasts
-        the updated player list to all clients.
+        Releases the player assigned to a WebSocket, if any.
         """
-        play_manager.player_quit(sid)
-        await broadcast_state("players", play_manager.get_player_info())
+        player = players_by_connection.pop(sid, None)
+        if player is not None:
+            play_manager.player_quit(player.player_id)
+            await broadcast_state("players", play_manager.get_player_info())
 
-    async def handle_input(sid, data):
+    async def handle_input(sid, ws, data):
         """
-        Updates the player name and processes player inputs, then broadcasts
-        the updated player list to all clients.
+        Processes a connection command, player update, or control input.
 
         Args:
             sid (str): Session identifier
             data (dict): Player data containing:
-                - 'player_name' (str): Display name of the player
-                - 'button' (str): Button identifier
-                - 'pressed' (bool): Button state
+                - 'command' (str): Optional command, such as 'CONNECT' or 'RELEASE'
+                - 'player_name' (str): Optional display name
+                - 'button' (str): Control button identifier
+                - 'pressed' (bool): Control button state
         """
-        player = play_manager.get_player_from_socket_id(sid)
-        if player:
-            player_name = data.get("player_name")
+        if data.get("command") == "CONNECT":
+            await connect_player(sid, ws, data)
+            return
 
-            if isinstance(player_name, str) and len(player_name) <= max_player_name_length:
-                player.player_name = player_name
+        if data.get("command") == "RELEASE":
+            await release_player(sid)
+            return
 
-            player.handle_input(data)
-            await broadcast_state("players", play_manager.get_player_info())
+        if data.get("button") == "UPDATE":
+            player = players_by_connection.get(sid)
+            if player:
+                player_name = data.get("player_name")
+                if isinstance(player_name, str) and len(player_name) <= max_player_name_length:
+                    player.player_name = player_name
+                await broadcast_state("players", play_manager.get_player_info())
+            return
+
+        if not isinstance(data.get("button"), str) or not isinstance(data.get("pressed"), bool):
+            return
+
+        player = players_by_connection.get(sid)
+        if player is None:
+            return
+
+        player_name = data.get("player_name")
+        if isinstance(player_name, str) and len(player_name) <= max_player_name_length:
+            player.player_name = player_name
+
+        player.handle_input(data)
+        await broadcast_state("players", play_manager.get_player_info())
 
     async def handle_websocket(request):
         """
@@ -122,22 +153,18 @@ def init_webserver(bundle_dir, config, play_manager, server_name):
         request.app["websockets"].add(ws)
 
         try:
-            await handle_connect(sid, ws)
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
                     data = json.loads(msg.data)
-                    await handle_input(sid, data)
+                    await handle_input(sid, ws, data)
                 elif msg.type == aiohttp.WSMsgType.ERROR:
                     print(f"WebSocket connection closed with exception {ws.exception()}")
         # Handle interrupts
         except asyncio.CancelledError:
             pass
         finally:
-            request.app["websockets"].remove(ws)
-            try:
-                await handle_disconnect(sid)
-            except Exception:
-                pass
+            request.app["websockets"].discard(ws)
+            await release_player(sid)
 
         return ws
 

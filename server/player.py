@@ -10,7 +10,7 @@ class Player:
         player_id (int): Player object identifier.
         selection (int or None): Current vehicle selection (1-indexed), or None if no vehicle selected.
         player_name (str or None): Display name of the player.
-        socket_id (str or None): Socket.IO session identifier for the connected player.
+        active (bool): Whether the player slot is assigned to a connected client.
         buttons (set): Set of currently pressed button identifiers.
         last_activity (float): Timestamp of the last input.
     """
@@ -26,7 +26,7 @@ class Player:
         self.play_manager = play_manager
         self.selection = None
         self.player_name = None
-        self.socket_id = None
+        self.active = False
         self.player_id = player_id
         self.buttons = set()
         self.last_activity = time.time()
@@ -71,7 +71,7 @@ class Player:
         else:
             self.buttons.discard(input["button"])
 
-        self.logger.debug(f"Session {self.socket_id} - {self.buttons if len(self.buttons) > 0 else {''}} - {self.selection}")
+        self.logger.debug(f"Player {self.player_id} - {self.buttons if len(self.buttons) > 0 else {''}} - {self.selection}")
 
         vehicle = self.play_manager.get_vehicle_from_id(self.selection) or None
         if vehicle:

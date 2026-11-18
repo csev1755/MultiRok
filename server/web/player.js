@@ -28,6 +28,7 @@ const defaultSettingsButton = document.getElementById('default-settings');
 
 let videoToggle = true;
 let currentPlayerId = null;
+let pendingConnect = false;
 
 let inactivityTimer = null;
 const INACTIVITY_TIMEOUT = parseInt(splashWindow.dataset.wsTimeout, 10) * 1000;
@@ -281,7 +282,7 @@ function cycleStream(direction)
  */
 function emitInputEvent(button, pressed)
 {
-    if (socket && socket.readyState === WebSocket.OPEN)
+    if (splashWindow.classList.contains('hidden') && socket && socket.readyState === WebSocket.OPEN)
     {
         socket.send(JSON.stringify({button, pressed, player_name : playerNameInput.value}));
     }
@@ -482,14 +483,32 @@ function handleKeyup(e)
 // Initialize WS and bind appropriate handlers
 function connectWebSocket()
 {
+    if (socket && socket.readyState !== WebSocket.CLOSED)
+        return;
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
     socket.onmessage = (event) => {
         const message = JSON.parse(event.data);
+        if (message.error === 'no_player_slots')
+        {
+            pendingConnect = false;
+            splashConnectButton.disabled = false;
+            splashWelcomeTitle.textContent = 'No players available';
+            return;
+        }
+
         if (message.player_id !== undefined)
         {
             currentPlayerId = message.player_id;
+            if (pendingConnect)
+            {
+                pendingConnect = false;
+                splashConnectButton.disabled = false;
+                splashWindow.classList.add('hidden');
+                resetInactivityTimer();
+            }
         }
 
         if (message.players)
@@ -499,30 +518,39 @@ function connectWebSocket()
     };
 
     socket.onopen = () => {
-        emitInputEvent('UPDATE', true);
-        resetInactivityTimer();
+        splashConnectButton.disabled = false;
+        if (splashWindow.classList.contains('hidden'))
+            resetInactivityTimer();
+    };
+
+    socket.onclose = () => {
+        socket = null;
+        currentPlayerId = null;
+        pendingConnect = false;
+        splashConnectButton.disabled = false;
+        clearTimeout(inactivityTimer);
     };
 }
 
 // When called, resets the WS inactivity timer
 function resetInactivityTimer()
 {
-    if (!socket || socket.readyState !== WebSocket.OPEN)
+    if (!splashWindow.classList.contains('hidden') || !socket || socket.readyState !== WebSocket.OPEN)
         return;
     clearTimeout(inactivityTimer);
     inactivityTimer = setTimeout(() => { inactivityTimeout(); }, INACTIVITY_TIMEOUT);
 }
 
-// Closes socket and opens splash when inactivityTimer elapses
+// Releases the player and opens splash when inactivityTimer elapses
 function inactivityTimeout()
 {
-    if (socket)
+    if (socket && socket.readyState === WebSocket.OPEN)
     {
-        socket.close();
-        socket = null;
+        socket.send(JSON.stringify({command : 'RELEASE'}));
     }
 
     clearTimeout(inactivityTimer);
+    currentPlayerId = null;
 
     closeSettings();
     splashWindow.classList.remove('hidden');
@@ -544,8 +572,16 @@ function initSplash()
     }
 
     splashConnectButton.addEventListener('click', () => {
-        splashWindow.classList.add('hidden');
-        connectWebSocket();
+        if (!socket || socket.readyState !== WebSocket.OPEN)
+        {
+            splashWelcomeTitle.textContent = 'Unable to connect to server';
+            return;
+        }
+
+        pendingConnect = true;
+        splashConnectButton.disabled = true;
+        splashWelcomeTitle.textContent = 'Connecting...';
+        socket.send(JSON.stringify({command : 'CONNECT', player_name : playerNameInput.value}));
     });
 }
 
@@ -673,6 +709,18 @@ function init()
     initSettings();
     initDrag();
     initSplash();
+    splashConnectButton.disabled = true;
+    connectWebSocket();
+
+    window.addEventListener('pagehide', () => {
+        if (socket)
+            socket.close();
+    });
+
+    window.addEventListener('pageshow', (event) => {
+        if (event.persisted)
+            connectWebSocket();
+    });
 
     const pollingLoop = () => {
         pollGamepad();
