@@ -39,6 +39,8 @@ class Vehicle(ABC):
         self.name = name
         self.config = config
         self.logger = logger
+        self.controls: set[str] = set()
+        self.player_ids: set[int] = set()
 
     @classmethod
     def configure(cls, play_manager, type, config, id, name, logger):
@@ -67,11 +69,7 @@ class Vehicle(ABC):
         return device(play_manager, config, id, name, logger)
 
     @abstractmethod
-    def control(self, player, play_manager):
+    def control(self):
         """
-        Abstract method to control the vehicle based on player input.
-
-        Args:
-            player (Player): The player issuing commands.
-            play_manager (PlayManager): The parent command deck instance.
+        Abstract method to apply the vehicle's current controls.
         """

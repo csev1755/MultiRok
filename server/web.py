@@ -139,7 +139,7 @@ def init_webserver(bundle_dir, config, play_manager, server_name):
         if isinstance(player_name, str) and len(player_name) <= max_player_name_length:
             player.player_name = player_name
 
-        player.handle_input(data)
+        play_manager.handle_input(player, data)
         await broadcast_state("players", play_manager.get_player_info())
 
     async def handle_websocket(request):

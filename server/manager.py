@@ -9,9 +9,9 @@ class PlayManager:
     Manages player and vehicle states.
 
     Attributes:
-        players (dict[int, Player]): Mapping of player IDs to Player instances.
+        players (list[Player]): Player slots indexed by zero-based player ID.
         max_player_count (int): Max number of players from config.
-        vehicles (dict[int, Vehicle]): Mapping of vehicle IDs to Vehicle instances.
+        vehicles (list[Vehicle]): Vehicles ordered by their one-based IDs.
         vehicle_count (int): Number of selectable vehicles.
     """
 
@@ -23,34 +23,37 @@ class PlayManager:
         """
         self.logger = logger
         self.config = config
-
         self.allow_share = self.config["webserver"].getboolean("allow_share")
 
-        self.players: dict[int, Player] = {}
         self.max_player_count = self.config.getint("webserver", "max_players")
-
-        self.vehicles: dict[int, Vehicle] = {}
+        self.players = [Player(player_id) for player_id in range(self.max_player_count)]
+        self.vehicles = []
         self.vehicle_count = 0
 
+        vehicles_by_id = {}
         for section in config.sections():
             if section.endswith(".vehicles"):
-                device_vehicles = config[section].items()
                 device_name = section.replace(".vehicles", "")
                 device_config = config[device_name]
 
-                for vehicle_id, vehicle_name in device_vehicles:
-                    self.vehicle_count += 1
-                    self.vehicles[int(vehicle_id)] = Vehicle.configure(
+                for vehicle_id, vehicle_name in config[section].items():
+                    vehicle_id = int(vehicle_id)
+                    if vehicle_id in vehicles_by_id:
+                        raise ValueError(f"Duplicate vehicle ID: {vehicle_id}")
+                    vehicles_by_id[vehicle_id] = Vehicle.configure(
                         play_manager=self,
                         type=device_name,
                         config=device_config,
-                        id=int(vehicle_id),
+                        id=vehicle_id,
                         name=vehicle_name,
                         logger=self.logger,
                     )
 
-        for player_id in range(1, self.max_player_count + 1):
-            self.players[player_id] = Player(self, player_id, self.logger)
+        vehicle_ids = sorted(vehicles_by_id)
+        if vehicle_ids != list(range(1, len(vehicle_ids) + 1)):
+            raise ValueError("Vehicle IDs must be consecutive integers starting at 1")
+        self.vehicles = [vehicles_by_id[vehicle_id] for vehicle_id in vehicle_ids]
+        self.vehicle_count = len(self.vehicles)
 
     def player_join(self):
         """
@@ -59,10 +62,12 @@ class PlayManager:
         Returns:
             Player or None: The assigned Player object.
         """
-        for player in self.players.values():
+        for player in self.players:
             if not player.active:
                 player.active = True
-                player.selection = None
+                player.selected_vehicle = None
+                player.buttons.clear()
+                player.last_activity = time.time()
                 self.logger.info(f"Assigned Player object {player.player_id}")
                 return player
         self.logger.warning("No Player object available")
@@ -73,64 +78,116 @@ class PlayManager:
         Releases the Player object associated with a client.
 
         Args:
-            player_id (int): Player identifier.
+            player_id (int): Zero-based player identifier.
 
         Returns:
             Player or None: The released Player object.
         """
-        player = self.players.get(player_id)
-        if player is None or not player.active:
+        if not isinstance(player_id, int) or player_id < 0 or player_id >= len(self.players):
+            return None
+        player = self.players[player_id]
+        if not player.active:
             return None
 
-        old_vehicle = self.get_vehicle_from_id(player.selection)
+        old_vehicle = player.selected_vehicle
         player.active = False
         player.player_name = None
-        player.selection = None
-        player.buttons = set()
+        player.selected_vehicle = None
+        player.buttons.clear()
         if old_vehicle:
-            old_vehicle.control(player, self)
+            self._update_vehicle_controls(old_vehicle)
+            old_vehicle.control()
         self.logger.info(f"Released Player object {player.player_id}")
         return player
 
-    def get_vehicle_from_id(self, vehicle_id=None):
+    def handle_input(self, player, input):
         """
-        Retrieves a vehicle by its ID.
+        Updates player input, recomputes affected vehicle controls, and applies them.
 
         Args:
-            vehicle_id (int or None): The vehicle identifier.
-
-        Returns:
-            Vehicle or None: The matching vehicle.
+            player (Player): The player issuing commands.
+            input (dict): A dictionary containing a button and pressed state.
         """
-        for vehicle in self.vehicles.values():
-            if vehicle.id == vehicle_id:
-                return vehicle
-        return None
+        if not player.active or not isinstance(input.get("button"), str) or not isinstance(input.get("pressed"), bool):
+            return
+
+        old_vehicle = player.selected_vehicle
+        button = input["button"]
+        if input["pressed"]:
+            if button in ("SELECT_UP", "SELECT_DOWN"):
+                delta = 1 if button == "SELECT_UP" else -1
+                player.selected_vehicle = self._cycle_vehicle_selection(player, delta)
+            player.buttons.add(button)
+        else:
+            player.buttons.discard(button)
+
+        self.logger.debug(f"Player {player.player_id} - {player.buttons if player.buttons else {''}} - {player.selection}")
+
+        affected_vehicles = {vehicle for vehicle in (old_vehicle, player.selected_vehicle) if vehicle is not None}
+        for vehicle in affected_vehicles:
+            self._update_vehicle_controls(vehicle)
+
+        if player.selected_vehicle:
+            player.last_activity = time.time()
+        for vehicle in affected_vehicles:
+            vehicle.control()
+
+    def _cycle_vehicle_selection(self, player, delta):
+        for connected_player in self.players:
+            self._expire_selection(connected_player)
+
+        current_selection = player.selection or 0
+        occupied_selections = {
+            other.selection
+            for other in self.players
+            if other.active and other is not player and other.selection is not None
+        }
+
+        for _ in range(self.vehicle_count):
+            new_selection = (current_selection + delta) % (self.vehicle_count + 1)
+            if new_selection == 0:
+                return None
+            if self.allow_share or new_selection not in occupied_selections:
+                return self.vehicles[new_selection - 1]
+            current_selection = new_selection
+
+        return player.selected_vehicle
+
+    def _update_vehicle_controls(self, vehicle):
+        players = [player for player in self.players if player.active and player.selected_vehicle is vehicle]
+        vehicle.player_ids = {player.player_id for player in players}
+        vehicle.controls = {button for player in players for button in player.buttons}
+
+    def _expire_selection(self, player):
+        if (
+            player.active
+            and player.selected_vehicle
+            and time.time() - player.last_activity > self.config.getint("webserver", "player_timeout")
+        ):
+            old_vehicle = player.selected_vehicle
+            player.selected_vehicle = None
+            player.buttons.clear()
+            self._update_vehicle_controls(old_vehicle)
+            old_vehicle.control()
 
     def get_player_info(self):
         """
-        Retrieves data about all connected players and times out selections if needed.
+        Retrieves data about connected players and expires idle vehicle selections.
 
         Returns:
-            list[dict]: A list of player metadata dictionaries:
-                - 'player_name' (str or None): Player display name
-                - 'selection' (int or None): Currently selected vehicle ID
-                - 'selection_name' (str or None): Name of the selected vehicle
+            list[dict]: Player metadata dictionaries.
         """
         players = []
 
-        for player in self.players.values():
+        for player in self.players:
+            self._expire_selection(player)
             if player.active:
-                if player.selection and time.time() - player.last_activity > self.config.getint("webserver", "player_timeout"):
-                    player.selection = None
-
-                player_vehicle = self.get_vehicle_from_id(player.selection) if player.selection else None
                 players.append(
                     {
                         "player_id": player.player_id,
                         "player_name": player.player_name,
                         "selection": player.selection,
-                        "selection_name": player_vehicle.name if player_vehicle else None,
+                        "selection_name": player.selected_vehicle.name if player.selected_vehicle else None,
                     }
                 )
 

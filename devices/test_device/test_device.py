@@ -11,10 +11,8 @@ class TestDevice(Vehicle):
     def __init__(self, play_manager, config, id, name, logger):
         super().__init__(play_manager, config, id, name, logger)
 
-    def control(self, player, play_manager):
+    def control(self):
         """
-        Prints player inputs for players that have this vehicle selected.
+        Prints this vehicle's active controls.
         """
-        print(
-            f"Player {player.player_id} controlled test_vehicle {player.selection} with input {player.buttons if len(player.buttons) > 0 else {''}}"
-        )
+        print(f"Vehicle {self.id} controlled with input {self.controls if self.controls else {''}}")
