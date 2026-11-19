@@ -1,12 +1,17 @@
+import configparser
 import datetime
 import logging
 import os
 import queue
+import sys
 import time
 
-from PyQt6.QtCore import QEvent, QTimer
-from PyQt6.QtGui import QBrush, QColor, QIcon, QPalette
-from PyQt6.QtWidgets import QGroupBox, QHeaderView, QLabel, QMainWindow, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
+from PyQt6.QtCore import QEvent, QTimer, QUrl
+from PyQt6.QtGui import QAction, QBrush, QColor, QDesktopServices, QIcon, QPalette
+from PyQt6.QtWidgets import QDialog, QGroupBox, QHeaderView, QLabel, QMainWindow, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
+
+from server.config import CONFIG_SCHEMA
+from server.gui.settings_gui import SettingsEditorDialog
 
 
 class GUILogHandler(logging.Handler):
@@ -55,7 +60,7 @@ class MultiRokGUI(QMainWindow):
         "CRITICAL": QColor("#B00000"),
     }
 
-    def __init__(self, play_manager, go2rtc=None, bundle_dir="."):
+    def __init__(self, play_manager, go2rtc=None, bundle_dir=".", config_file="settings.ini", listen_port=5001):
         """
         Initializes the main window.
         """
@@ -64,21 +69,75 @@ class MultiRokGUI(QMainWindow):
         self.play_manager = play_manager
         self.go2rtc = go2rtc
         self.bundle_dir = bundle_dir
+        self.config_file = config_file
+        self.listen_port = listen_port
 
         self.setWindowTitle("MultiRok Server")
-        self.resize(650, 550)
-        self.setMinimumSize(650, 550)
+        self.resize(650, 650)
+        self.setMinimumSize(300, 300)
 
         # Set Main Window Icon
         icon_path = os.path.join(self.bundle_dir, "server", "web", "favicon.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
+        # Menu Bar Setup
+        top_menubar = self.menuBar()
+        if top_menubar:
+            top_menubar.setStyleSheet("""
+                QMenuBar {
+                    padding: 2px 4px;
+                }
+                QMenuBar::item {
+                    padding: 4px 12px;
+                }
+                QMenuBar::item:selected {
+                    background-color: rgba(255, 255, 255, 30);
+                    border-radius: 3px;
+                }
+            """)
+
+            # Play Menu
+            play_menu = top_menubar.addMenu("Play")
+            if play_menu:
+                open_client_action = QAction("Open Client", self)
+                open_client_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(f"http://localhost:{self.listen_port}")))
+                play_menu.addAction(open_client_action)
+
+            # Server Menu
+            server_menu = top_menubar.addMenu("Server")
+            if server_menu:
+                stop_action = QAction("Stop", self)
+                stop_action.triggered.connect(self.close)
+                server_menu.addAction(stop_action)
+
+                restart_action = QAction("Restart", self)
+                restart_action.triggered.connect(self.restart_application)
+                server_menu.addAction(restart_action)
+
+            # Settings Menu
+            settings_menu = top_menubar.addMenu("Settings")
+            if settings_menu:
+                settings_editor_action = QAction("Settings Editor", self)
+                settings_editor_action.triggered.connect(self.open_settings_dialog)
+                settings_menu.addAction(settings_editor_action)
+
+            # Help Menu
+            help_menu = top_menubar.addMenu("Help")
+            if help_menu:
+                github_action = QAction("MultiRok GitHub", self)
+                github_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/csev1755/MultiRok")))
+                help_menu.addAction(github_action)
+
+                doc_action = QAction("MultiRok Documentation", self)
+                doc_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl("https://csev1755.github.io/MultiRok/")))
+                help_menu.addAction(doc_action)
+
         # Central Widget & Main Layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(15, 15, 15, 15)
+        main_layout.setContentsMargins(15, 0, 15, 15)
         main_layout.setSpacing(10)
 
         # Status Group Box
@@ -93,9 +152,8 @@ class MultiRokGUI(QMainWindow):
         player_list_layout = QVBoxLayout(self.player_list_group)
 
         self.player_list_tree = QTreeWidget()
-        self.player_list_tree.setColumnCount(4)
-        self.player_list_tree.setHeaderLabels(["Player ID", "Player Name", "Vehicle ID", "Vehicle Name"])
-        self.player_list_tree.setFixedHeight(220)
+        self.player_list_tree.setColumnCount(5)
+        self.player_list_tree.setHeaderLabels(["Player ID", "Player Name", "Vehicle ID", "Vehicle Name", "Buttons"])
         self.player_list_tree.setRootIsDecorated(False)
         self.player_list_tree.setIndentation(0)
 
@@ -104,11 +162,13 @@ class MultiRokGUI(QMainWindow):
             player_list_tree_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
             player_list_tree_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
             player_list_tree_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
-            player_list_tree_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+            player_list_tree_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
+            player_list_tree_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
 
         self.player_list_tree.setColumnWidth(0, 65)
-        self.player_list_tree.setColumnWidth(1, 150)
+        self.player_list_tree.setColumnWidth(1, 130)
         self.player_list_tree.setColumnWidth(2, 65)
+        self.player_list_tree.setColumnWidth(3, 130)
 
         player_list_layout.addWidget(self.player_list_tree)
         main_layout.addWidget(self.player_list_group)
@@ -147,11 +207,29 @@ class MultiRokGUI(QMainWindow):
         # GUI & Log Refresh Timers for Polling
         self.ui_timer = QTimer(self)
         self.ui_timer.timeout.connect(self.update_gui)
-        self.ui_timer.start(500)
+        self.ui_timer.start(100)
 
         self.log_timer = QTimer(self)
         self.log_timer.timeout.connect(self.update_logs)
         self.log_timer.start(100)
+
+    def open_settings_dialog(self):
+        """
+        Opens the settings editor dialog and restarts the server if necessary.
+        """
+        dialog = SettingsEditorDialog(config_file=self.config_file, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.restart_requested:
+            self.restart_application()
+
+    def restart_application(self):
+        """
+        Cleanly restarts the entire python application process.
+        """
+        if self.go2rtc:
+            self.go2rtc.stop()
+
+        python = sys.executable
+        os.execl(python, python, *sys.argv)
 
     def changeEvent(self, event):
         """
@@ -208,7 +286,12 @@ class MultiRokGUI(QMainWindow):
                     if vehicle:
                         vehicle_name_text = vehicle.name
 
-                self.player_list_tree.addTopLevelItem(QTreeWidgetItem([str(player_id), name, selection_id_text, vehicle_name_text]))
+                active_buttons = [str(b) for b in player.buttons if b != "UPDATE"] if player.buttons else []
+                buttons_text = ", ".join(sorted(active_buttons)) if active_buttons else ""
+
+                self.player_list_tree.addTopLevelItem(
+                    QTreeWidgetItem([str(player_id), name, selection_id_text, vehicle_name_text, buttons_text])
+                )
 
         # Total Player Count
         self.player_list_group.setTitle(f"Connected Players: {connected_player_count} / {self.play_manager.max_player_count}")

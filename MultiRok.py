@@ -11,7 +11,7 @@ from aiohttp import web
 from PyQt6.QtWidgets import QApplication
 
 from server.go2rtc import Go2RTC
-from server.gui import MultiRokGUI
+from server.gui.main_gui import MultiRokGUI
 from server.manager import PlayManager
 from server.web import init_webserver
 
@@ -91,12 +91,14 @@ if __name__ == "__main__":
         go2rtc.start()
 
     # Start the webserver in a background thread
+    listen_port = config["webserver"].getint("listen_port") or 5001
+
     def start_webserver():
         try:
             web.run_app(
                 aiohttp_app,
                 host=config["webserver"]["listen_ip"],
-                port=config["webserver"].getint("listen_port"),
+                port=listen_port,
                 shutdown_timeout=0.1,
                 handle_signals=False,
             )
@@ -109,7 +111,7 @@ if __name__ == "__main__":
     # Start PyQt Application on the main thread
     try:
         app = QApplication(sys.argv)
-        gui = MultiRokGUI(play_manager, go2rtc, bundle_dir)
+        gui = MultiRokGUI(play_manager, go2rtc, bundle_dir, config_file, listen_port)
         logging.getLogger().addHandler(gui.log_handler)
         gui.show()
         sys.exit(app.exec())
