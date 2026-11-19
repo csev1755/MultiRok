@@ -2,12 +2,13 @@ import datetime
 import logging
 import os
 import queue
+import subprocess
 import sys
 import time
 
 from PyQt6.QtCore import QEvent, QTimer, QUrl
 from PyQt6.QtGui import QAction, QBrush, QColor, QDesktopServices, QIcon, QPalette
-from PyQt6.QtWidgets import QDialog, QGroupBox, QHeaderView, QLabel, QMainWindow, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QDialog, QGroupBox, QHeaderView, QLabel, QMainWindow, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QApplication
 
 from server.gui.settings_gui import SettingsEditorDialog
 
@@ -220,14 +221,19 @@ class MultiRokGUI(QMainWindow):
             self.restart_application()
 
     def restart_application(self):
-        """
-        Cleanly restarts the entire python application process.
-        """
+        """Cleanly stop services and relaunch the app or frozen executable."""
         if self.go2rtc:
             self.go2rtc.stop()
 
-        python = sys.executable
-        os.execl(python, python, *sys.argv)
+        env = os.environ.copy()
+        if getattr(sys, "frozen", False):
+            cmd = [sys.executable, *sys.argv[1:]]
+            env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+        else:
+            cmd = [sys.executable, *sys.argv]
+
+        subprocess.Popen(cmd, env=env)
+        QApplication.quit()
 
     def changeEvent(self, event):
         """
