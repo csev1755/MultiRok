@@ -1,4 +1,3 @@
-import configparser
 import datetime
 import logging
 import os
@@ -10,7 +9,6 @@ from PyQt6.QtCore import QEvent, QTimer, QUrl
 from PyQt6.QtGui import QAction, QBrush, QColor, QDesktopServices, QIcon, QPalette
 from PyQt6.QtWidgets import QDialog, QGroupBox, QHeaderView, QLabel, QMainWindow, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
 
-from server.config import CONFIG_SCHEMA
 from server.gui.settings_gui import SettingsEditorDialog
 
 
@@ -310,6 +308,11 @@ class MultiRokGUI(QMainWindow):
         if not new_logs:
             return
 
+        scrollbar = self.log_tree.verticalScrollBar()
+        scrollbar_at_bottom = True
+        if scrollbar:
+            scrollbar_at_bottom = (scrollbar.maximum() - scrollbar.value()) <= 5
+
         # Color Logs According to Severity
         colored_new_logs = []
         for log_entry in new_logs:
@@ -324,7 +327,8 @@ class MultiRokGUI(QMainWindow):
         while self.log_tree.topLevelItemCount() > 256:
             self.log_tree.takeTopLevelItem(0)
 
-        self.log_tree.scrollToBottom()
+        if scrollbar_at_bottom:
+            self.log_tree.scrollToBottom()
 
     def closeEvent(self, event):
         """

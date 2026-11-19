@@ -5,9 +5,9 @@ CONFIG_SCHEMA = {
         "options": {
             "listen_ip": {
                 "type": "str",
-                 "default": "0.0.0.0",
-                 "label": "Listen IP",
-                 "description": "IP address the web server will listen on."
+                "default": "0.0.0.0",
+                "label": "Listen IP",
+                "description": "IP address the web server will listen on.",
             },
             "listen_port": {
                 "type": "int",
@@ -21,7 +21,7 @@ CONFIG_SCHEMA = {
                 "type": "bool",
                 "default": False,
                 "label": "Enable Video",
-                "description": "Enables video streaming using go2rtc when enabled."
+                "description": "Enables video streaming using go2rtc when enabled.",
             },
             "player_timeout": {
                 "type": "int",
@@ -82,7 +82,7 @@ CONFIG_SCHEMA = {
                 "label": "Test Device",
                 "max_key": None,
                 "options": {
-                        "test_option": {
+                    "test_option": {
                         "type": "bool",
                         "default": False,
                         "label": "Test Option",
@@ -121,13 +121,13 @@ CONFIG_SCHEMA = {
                 "choices": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
                 "default": "ERROR",
                 "label": "go2rtc Logging Level",
-                "description": "Verbosity of go2rtc applicarion logging messsages.",
+                "description": "Verbosity of go2rtc application logging messsages.",
             },
             "file": {
                 "type": "bool",
                 "default": False,
                 "label": "Enable Log File",
-                "description": "Enables log file saving when selected."
+                "description": "The server will save all logs to a file when selected.",
             },
         },
     },
