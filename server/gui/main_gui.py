@@ -8,7 +8,18 @@ import time
 
 from PyQt6.QtCore import QEvent, QTimer, QUrl
 from PyQt6.QtGui import QAction, QBrush, QColor, QDesktopServices, QIcon, QPalette
-from PyQt6.QtWidgets import QDialog, QGroupBox, QHeaderView, QLabel, QMainWindow, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QApplication
+from PyQt6.QtWidgets import (
+    QDialog,
+    QGroupBox,
+    QHeaderView,
+    QLabel,
+    QMainWindow,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
+    QApplication,
+)
 
 from server.gui.settings_gui import SettingsEditorDialog
 
@@ -41,6 +52,8 @@ class MultiRokGUI(QMainWindow):
         play_manager (PlayManager): MultiRok server's PlayManager object.
         go2rtc (Go2RTC): MultiRok server's Go2RTC process.
         bundle_dir (str): Program root directory for serving favicon.
+        config_file (str): Path to config file used by __main__.
+        listen_port (int): Webserver port used by __main__.
     """
 
     LOG_COLORS_DARK = {

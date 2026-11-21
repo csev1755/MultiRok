@@ -1,7 +1,7 @@
 CONFIG_SCHEMA = {
     "webserver": {
         "label": "Web Server",
-        "type": "section",
+        "type": "settings_page",
         "options": {
             "listen_ip": {
                 "type": "str",
@@ -59,11 +59,11 @@ CONFIG_SCHEMA = {
         "label": "Vehicles",
         "type": "vehicle_dynamic_map",
         "description": "Configuration of all vehicle numbers, names, and types.  Vehicle numbers must start with 1 and count upwards consecutively.",
-        "sources": {
+        "vehicle_types": {
             "smart_port_serial": {
                 "label": "Smart Port Serial",
                 "max_key": 15,
-                "options": {
+                "vehicle_options": {
                     "serial_port": {
                         "type": "str",
                         "default": "auto",
@@ -81,7 +81,7 @@ CONFIG_SCHEMA = {
             "test_device": {
                 "label": "Test Device",
                 "max_key": None,
-                "options": {
+                "vehicle_options": {
                     "test_option": {
                         "type": "bool",
                         "default": False,
@@ -100,7 +100,7 @@ CONFIG_SCHEMA = {
     },
     "logging": {
         "label": "Logging",
-        "type": "section",
+        "type": "settings_page",
         "options": {
             "main": {
                 "type": "choice",

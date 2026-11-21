@@ -30,7 +30,15 @@ from server.config import CONFIG_SCHEMA
 
 
 def _parse_bool(value):
-    """Convert config or INI values into a boolean."""
+    """
+    Safely convert schema values into a boolean.
+
+    Args:
+        value (Any): The value to be parsed.
+
+    Returns:
+        Bool: Output boolean from conversion.
+    """
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
@@ -39,7 +47,15 @@ def _parse_bool(value):
 
 
 def _parse_int(value, fallback=0):
-    """Safely convert a value to int, returning `fallback` when missing or invalid."""
+    """
+    Safely convert schema values into integers.
+
+    Args:
+        value (Any): The value to be parsed.
+
+    Returns:
+        Int: Output integer from conversion.
+    """
     if value is None:
         return fallback
     try:
@@ -49,23 +65,39 @@ def _parse_int(value, fallback=0):
 
 
 class NoScrollSpinBox(QSpinBox):
-    """QSpinBox that ignores wheel events so scrolling a tab won't change numbers."""
+    """
+    QSpinBox that ignores wheel events so scrolling a tab won't change numbers.
+    """
 
     def wheelEvent(self, event):
         event.ignore()
 
 
 class SettingsEditorDialog(QDialog):
-    """Modal settings dialog generated from `CONFIG_SCHEMA` and a `settings.ini` file."""
+    """
+    Settings editor dialog dynamically generated from `CONFIG_SCHEMA` and the settings file.
+
+    Attributes:
+        config_file (str): Path to config file used by __main__.
+        parent (QWidget): Parent QWidget that opened the dialog.
+        widgets_map (dict): Maps schema section keys or (section, option) tuples to (config_section_type, widget_or_table).
+        _table_schemas (dict): Stores each table section's schema dict.
+        restart_requested (bool): The parent widget checks this value after the dialog closes.
+    """
 
     def __init__(self, config_file="settings.ini", parent=None):
+        """
+        Initializes the settings editor dialog.
+
+        Args:
+            config_file (str): Path to config file used by __main__.
+            parent (QWidget): Parent QWidget that opened the dialog.
+        """
         super().__init__(parent)
         self.config_file = config_file
         self.config = self._load_config_parser(config_file)
 
-        # Maps schema section keys or (section, option) tuples to (kind, widget_or_table)
         self.widgets_map = {}
-        # Stores each table section's schema dict so reload/defaults stays schema-driven
         self._table_schemas = {}
         self.restart_requested = False
 
@@ -73,246 +105,334 @@ class SettingsEditorDialog(QDialog):
         self.resize(780, 550)
 
         self._init_ui()
-        self._populate_navigation()
+        self._populate_ui()
 
     @staticmethod
     def _load_config_parser(path):
-        """Create a case-preserving ConfigParser and load `path` if it exists."""
+        """
+        Create a ConfigParser and load it from the target path.
+
+        Args:
+            path (str): System path to the configuration file.
+
+        Returns:
+            ConfigParser: ConfigParser object loaded from the target path.
+        """
         parser = configparser.ConfigParser()
         parser.optionxform = lambda optionstr: optionstr
         if path and os.path.exists(path):
             parser.read(path)
         return parser
 
-    def _init_ui(self):
-        """Build the splitter navigation layout and bottom action buttons."""
-        main_layout = QVBoxLayout(self)
-
-        self.nav_splitter = QSplitter(Qt.Orientation.Horizontal)
-        main_layout.addWidget(self.nav_splitter)
-
-        self.nav_tree_widget = QTreeWidget()
-        self.nav_tree_widget.setHeaderHidden(True)
-        self.nav_tree_widget.setIndentation(14)
-        self.nav_tree_widget.currentItemChanged.connect(self._on_tree_item_changed)
-        self.nav_splitter.addWidget(self.nav_tree_widget)
-
-        self.page_stack = QStackedWidget()
-        self.nav_splitter.addWidget(self.page_stack)
-
-        button_layout = QHBoxLayout()
-        self.reload_button = QPushButton("Reload from File")
-        self.defaults_button = QPushButton("Load Defaults")
-        self.export_button = QPushButton("Export")
-        self.save_button = QPushButton("Save")
-        self.cancel_button = QPushButton("Cancel")
-
-        self.reload_button.clicked.connect(self.on_reload)
-        self.defaults_button.clicked.connect(self.on_defaults)
-        self.export_button.clicked.connect(self.on_save_as)
-        self.save_button.clicked.connect(self.on_save)
-        self.cancel_button.clicked.connect(self.reject)
-
-        button_layout.addWidget(self.reload_button)
-        button_layout.addWidget(self.defaults_button)
-        button_layout.addWidget(self.export_button)
-        button_layout.addStretch()
-        button_layout.addWidget(self.save_button)
-        button_layout.addWidget(self.cancel_button)
-
-        main_layout.addLayout(button_layout)
-
-    def _add_nav_item(self, page_widget, label, parent_tree_item=None):
-        """Add `page_widget` to the stacked view and create a matching tree item."""
-        page_index = self.page_stack.addWidget(page_widget)
-        tree_item = QTreeWidgetItem([label])
-        tree_item.setData(0, Qt.ItemDataRole.UserRole, page_index)
-        if parent_tree_item is None:
-            self.nav_tree_widget.addTopLevelItem(tree_item)
-        else:
-            parent_tree_item.addChild(tree_item)
-        return tree_item
-
-    def _populate_navigation(self):
-        """Populate pages and navigation tree items from `CONFIG_SCHEMA`."""
-        for section_name, section_def in CONFIG_SCHEMA.items():
-            section_type = section_def.get("type", "section")
-            label = section_def.get("label", section_name)
-
-            if section_type == "section":
-                section_page = self.create_section_tab(section_name, section_def)
-                self._add_nav_item(section_page, label)
-
-            elif section_type in ("unified_dynamic_map", "vehicle_dynamic_map"):
-                vehicles_page = self.create_unified_vehicles_tab(section_name, section_def)
-                parent_tree_item = self._add_nav_item(vehicles_page, label)
-
-                # Each source with options gets a child page under the Vehicles node
-                for source_key, source_def in section_def.get("sources", {}).items():
-                    if source_def.get("options"):
-                        source_label = source_def.get("label", source_key)
-                        source_page = self.create_section_tab(source_key, source_def)
-                        self._add_nav_item(source_page, source_label, parent_tree_item=parent_tree_item)
-
-                parent_tree_item.setExpanded(True)
-
-            elif section_type == "dynamic_map":
-                map_page = self.create_dynamic_map_tab(section_name, section_def)
-                self._add_nav_item(map_page, label)
-
-        self.nav_tree_widget.resizeColumnToContents(0)
-        tree_width = max(self.nav_tree_widget.sizeHintForColumn(0) + 30, 150)
-        self.nav_splitter.setSizes([tree_width, max(self.width() - tree_width, 400)])
-
-        if self.nav_tree_widget.topLevelItemCount() > 0:
-            self.nav_tree_widget.setCurrentItem(self.nav_tree_widget.topLevelItem(0))
-
     def _on_tree_item_changed(self, current_item, _previous_item):
+        """
+        Change the settings_page_stack to display the correct page based on nav tree input.
+        """
         if current_item is None:
             return
         page_index = current_item.data(0, Qt.ItemDataRole.UserRole)
         if page_index is not None:
-            self.page_stack.setCurrentIndex(page_index)
+            self.settings_page_stack.setCurrentIndex(page_index)
 
-    # ------------------------------------------------------------------
-    # Standard Option Tabs
-    # ------------------------------------------------------------------
+    def _init_ui(self):
+        """
+        Build the splitter navigation layout and bottom action buttons.
+        The navigation and pages are initially empty until _populate_ui() is called.
+        """
+        main_layout = QVBoxLayout(self)
 
-    def create_section_tab(self, section_name, section_def):
-        """Create a scrollable form tab for standard key/value schema options."""
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
+        # Splitter for Seperating Nav Tree from Settings Pages
+        self.settings_splitter = QSplitter(Qt.Orientation.Horizontal)
+        main_layout.addWidget(self.settings_splitter)
 
-        content_widget = QWidget()
-        form_layout = QVBoxLayout(content_widget)
-        form_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        form_layout.setSpacing(16)
+        # Settings Navigation Tree
+        self.settings_nav_tree = QTreeWidget()
+        self.settings_nav_tree.setHeaderHidden(True)
+        self.settings_nav_tree.setIndentation(14)
+        self.settings_nav_tree.currentItemChanged.connect(self._on_tree_item_changed)
+        self.settings_splitter.addWidget(self.settings_nav_tree)
 
-        for opt_key, opt_def in section_def.get("options", {}).items():
-            opt_type = opt_def.get("type", "str")
-            current_val = self._get_config_or_default(section_name, opt_key, opt_def)
-            option_widget = self._create_widget_for_option(opt_type, opt_def, current_val)
-            self.widgets_map[(section_name, opt_key)] = (opt_type, option_widget)
+        # Stack of Settings Page Widgets
+        self.settings_page_stack = QStackedWidget()
+        self.settings_splitter.addWidget(self.settings_page_stack)
 
-            field_container = QWidget()
-            field_layout = QVBoxLayout(field_container)
-            field_layout.setContentsMargins(0, 0, 0, 0)
-            field_layout.setSpacing(4)
+        # Buttons at Bottom of Dialog
+        button_layout = QHBoxLayout()
 
-            title_label = QLabel(f"<b>{opt_def.get('label', opt_key)}</b>")
-            field_layout.addWidget(title_label)
+        self.reload_button = QPushButton("Reload from File")
+        button_layout.addWidget(self.reload_button)
+        self.reload_button.clicked.connect(self.on_reload)
 
-            description = opt_def.get("description", "")
-            if description:
-                description_label = QLabel(f"<small style='color: gray;'>{description}</small>")
+        self.defaults_button = QPushButton("Load Defaults")
+        self.defaults_button.clicked.connect(self.on_defaults)
+        button_layout.addWidget(self.defaults_button)
+
+        self.export_button = QPushButton("Export")
+        self.export_button.clicked.connect(self.on_export)
+        button_layout.addWidget(self.export_button)
+
+        button_layout.addStretch()
+
+        self.save_button = QPushButton("Save")
+        self.save_button.clicked.connect(self.on_save)
+        button_layout.addWidget(self.save_button)
+
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(self.cancel_button)
+
+        main_layout.addLayout(button_layout)
+
+    def _populate_ui(self):
+        """
+        Dynamically populate navigation tree and settings pages from CONFIG_SCHEMA.
+        """
+
+        def add_page_to_ui(page_widget, page_label, parent_tree_item=None):
+            """
+            Add page_widget to settings_page_stack and settings_nav_tree.
+
+            Args:
+                page_widget (QWidget): Settings page to be added to the UI.
+                page_label (str): Label for the settings page.
+                parent_tree_item (QTreeWidgetItem): The parent tree item (for nested items).
+
+            Returns:
+                QTreeWidgetItem: The item added to the navigation tree.
+            """
+            page_index = self.settings_page_stack.addWidget(page_widget)
+            tree_item = QTreeWidgetItem([page_label])
+            tree_item.setData(0, Qt.ItemDataRole.UserRole, page_index)
+            if parent_tree_item is None:
+                self.settings_nav_tree.addTopLevelItem(tree_item)
+            else:
+                parent_tree_item.addChild(tree_item)
+            return tree_item
+
+        for item_name, item_contents in CONFIG_SCHEMA.items():
+            item_type = item_contents.get("type", "settings_page")  # Fallback to "settings_page"
+            item_label = item_contents.get("label", item_name)  # Fallback to item_name
+
+            if item_type == "settings_page":
+                settings_page = self.create_settings_page(item_name, item_contents)
+                add_page_to_ui(settings_page, item_label)
+
+            elif item_type == "vehicle_dynamic_map":
+                vehicles_page = self.create_vehicle_dynamic_map_page(item_name, item_contents)
+                vdm_tree_item = add_page_to_ui(vehicles_page, item_label)
+
+                for vehicle_type, vehicle_contents in item_contents.get("vehicle_types", {}).items():  # Fallback to {}
+                    if vehicle_contents.get("vehicle_options"):
+                        vehicle_label = vehicle_contents.get("label", vehicle_type)  # Fallback to vehicle_type
+                        vehicle_settings_page = self.create_settings_page(vehicle_type, vehicle_contents)
+                        add_page_to_ui(vehicle_settings_page, vehicle_label, parent_tree_item=vdm_tree_item)
+
+                vdm_tree_item.setExpanded(True)
+
+            elif item_type == "dynamic_map":
+                dynamic_map_page = self.create_dynamic_map_page(item_name, item_contents)
+                add_page_to_ui(dynamic_map_page, item_label)
+
+        self.settings_nav_tree.resizeColumnToContents(0)
+        tree_width = max(self.settings_nav_tree.sizeHintForColumn(0) + 30, 150)
+        self.settings_splitter.setSizes([tree_width, max(self.width() - tree_width, 400)])
+
+        if self.settings_nav_tree.topLevelItemCount() > 0:
+            self.settings_nav_tree.setCurrentItem(self.settings_nav_tree.topLevelItem(0))
+
+    def create_settings_page(self, page_name, page_contents):
+        """
+        Create a scrollable form tab for standard key/value schema options.
+
+        Args:
+            page_name (str): Name of this settings page.
+            page_contents (str): Raw contents of the config schema for this page.
+
+        Returns:
+            QScrollArea: Scrollable widget holding the contents of the settings page.
+        """
+        page_scroll_area = QScrollArea()
+        page_scroll_area.setWidgetResizable(True)
+
+        page_content_widget = QWidget()
+        page_form_layout = QVBoxLayout(page_content_widget)
+        page_form_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        page_form_layout.setSpacing(16)
+
+        for option_name, option_contents in page_contents.get("options", {}).items():  # Fallback to {}
+            option_type = option_contents.get("type", "str")  # Fallback to "str"
+            current_val = self._get_val_from_config(page_name, option_name, option_contents)
+            option_widget = self._create_option_widget(option_type, option_contents, current_val)
+            self.widgets_map[(page_name, option_name)] = (option_type, option_widget)
+
+            option_container = QWidget()
+            option_layout = QVBoxLayout(option_container)
+            option_layout.setContentsMargins(0, 0, 0, 0)
+            option_layout.setSpacing(4)
+
+            option_label = QLabel(f"<b>{option_contents.get('label', option_name)}</b>")  # Fallback to option_name
+            option_layout.addWidget(option_label)
+
+            option_description = option_contents.get("description", "")  # Fallback to ""
+            if option_description:
+                description_label = QLabel(f"<small style='color: gray;'>{option_description}</small>")
                 description_label.setWordWrap(True)
-                field_layout.addWidget(description_label)
+                option_layout.addWidget(description_label)
 
-            if opt_type != "bool":
+            if option_type != "bool":
                 option_widget.setMaximumWidth(300)
 
-            input_row_layout = QHBoxLayout()
-            input_row_layout.setContentsMargins(0, 0, 0, 0)
-            input_row_layout.addWidget(option_widget)
-            input_row_layout.addStretch()
-            field_layout.addLayout(input_row_layout)
+            option_input_layout = QHBoxLayout()
+            option_input_layout.setContentsMargins(0, 0, 0, 0)
+            option_input_layout.addWidget(option_widget)
+            option_input_layout.addStretch()
+            option_layout.addLayout(option_input_layout)
 
-            form_layout.addWidget(field_container)
+            page_form_layout.addWidget(option_container)
 
-        form_layout.addStretch()
-        scroll_area.setWidget(content_widget)
-        return scroll_area
+        page_form_layout.addStretch()
+        page_scroll_area.setWidget(page_content_widget)
+        return page_scroll_area
 
-    def _get_config_or_default(self, section_name, opt_key, opt_def):
-        if self.config.has_section(section_name) and self.config.has_option(section_name, opt_key):
-            return self.config.get(section_name, opt_key)
-        return opt_def.get("default")
+    def _get_val_from_config(self, section_name, option_name, option_contents):
+        """
+        Get the saved value of an option from the settings (or fall back to default).
 
-    def _create_widget_for_option(self, opt_type, opt_def, value):
-        if opt_type == "bool":
+        Args:
+            section_name (str): Name of the config schema section (settings page).
+            option_name (str): Name of the option being targeted.
+            option_contents (str): Raw contents of the config schema for this opton.
+
+        Returns:
+            Any: Value of the configuration item (or default if undefined).
+        """
+        if self.config.has_section(section_name) and self.config.has_option(section_name, option_name):
+            return self.config.get(section_name, option_name)
+        return option_contents.get("default")
+
+    def _create_option_widget(self, option_type, option_contents, value):
+        """
+        Create the widget for an option in the schema.
+
+        Args:
+            option_type (str): The type of option being created (bool, int, choice, or str).
+            option_contents (str): Raw contents of the config schema for this opton.
+            value (Any): Initial value of that widget to be displayed.
+
+        Returns:
+            QCheckBox | NoScrollSpinBox | QComboBox | QLineEdit: Created widget.
+        """
+        if option_type == "bool":
             option_widget = QCheckBox()
-        elif opt_type == "int":
+        elif option_type == "int":
             option_widget = NoScrollSpinBox()
-            option_widget.setRange(opt_def.get("min", -999999), opt_def.get("max", 999999))
-        elif opt_type == "choice":
+            option_widget.setRange(option_contents.get("min", 0), option_contents.get("max", 99999))
+        elif option_type == "choice":
             option_widget = QComboBox()
-            option_widget.addItems(opt_def.get("choices", []))
-        else:
+            option_widget.addItems(option_contents.get("choices", []))
+        else:  # option_type == "str"
             option_widget = QLineEdit()
 
-        self._set_widget_value(opt_type, opt_def, option_widget, value)
+        self._set_widget_value(option_type, option_contents, option_widget, value)
         return option_widget
 
     @staticmethod
-    def _set_widget_value(opt_type, opt_def, option_widget, value):
-        default_int = _parse_int(opt_def.get("default"), 0)
+    def _set_widget_value(option_type, option_contents, option_widget, value):
+        """
+        Set the value of an option widget.
 
-        if opt_type == "bool" and isinstance(option_widget, QCheckBox):
+        Args:
+            option_type (str): The type of option (bool, int, choice, or str).
+            option_contents (str): Raw contents of the config schema for this opton.
+            option_widget: The widget being targeted.
+            value (Any): Value to be set.
+        """
+        default_int = _parse_int(option_contents.get("default"), 0)
+
+        if option_type == "bool" and isinstance(option_widget, QCheckBox):
             option_widget.setChecked(_parse_bool(value))
-        elif opt_type == "int" and isinstance(option_widget, QSpinBox):
+        elif option_type == "int" and isinstance(option_widget, QSpinBox):
             option_widget.setValue(_parse_int(value, fallback=default_int))
-        elif opt_type == "choice" and isinstance(option_widget, QComboBox):
-            choices = opt_def.get("choices", [])
+        elif option_type == "choice" and isinstance(option_widget, QComboBox):
+            choices = option_contents.get("choices", [])
             str_val = str(value) if value is not None else ""
             if str_val in choices:
                 option_widget.setCurrentText(str_val)
-        elif isinstance(option_widget, QLineEdit):
+        elif isinstance(option_widget, QLineEdit):  # option_type == "str"
             option_widget.setText(str(value) if value is not None else "")
 
     @staticmethod
-    def _get_widget_value(opt_type, option_widget):
-        if opt_type == "bool" and isinstance(option_widget, QCheckBox):
+    def _get_widget_value(option_type, option_widget):
+        """
+        Get the current value of an option widget.
+
+        Args:
+            option_type (str): The type of option (bool, int, choice, or str).
+            option_widget: The widget being targeted.
+
+        Returns:
+            Any: Value of the widget.
+        """
+        if option_type == "bool" and isinstance(option_widget, QCheckBox):
             return str(option_widget.isChecked()).lower()
-        if opt_type == "int" and isinstance(option_widget, QSpinBox):
+        if option_type == "int" and isinstance(option_widget, QSpinBox):
             return str(option_widget.value())
-        if opt_type == "choice" and isinstance(option_widget, QComboBox):
+        if option_type == "choice" and isinstance(option_widget, QComboBox):
             return option_widget.currentText()
-        if isinstance(option_widget, QLineEdit):
+        if isinstance(option_widget, QLineEdit):  # option_type == "str"
             return option_widget.text()
         return ""
 
-    def _find_option_def(self, section_name, opt_key):
-        """Look up an option definition in top-level sections or nested `sources`."""
-        for sec_name, sec_def in CONFIG_SCHEMA.items():
-            if sec_name == section_name and "options" in sec_def:
-                return sec_def["options"].get(opt_key, {})
-            for s_key, s_def in sec_def.get("sources", {}).items():
-                if s_key == section_name and "options" in s_def:
-                    return s_def["options"].get(opt_key, {})
-        return {}
+    def _find_option_def(self, section_name, option_name):
+        """
+        Look up an option definition in top-level or nested sections.
 
-    # ------------------------------------------------------------------
-    # Table Tabs (Vehicles & Dynamic Maps)
-    # ------------------------------------------------------------------
+        Args:
+            section_name (str): Name of the config schema section (settings page).
+            option_name (str): Name of the option being searched for.
+
+        Returns:
+            Str: The contents of the setting with that name.
+        """
+        for sec_name, sec_contents in CONFIG_SCHEMA.items():
+            if sec_name == section_name and "options" in sec_contents:
+                return sec_contents["options"].get(option_name, {})
+            for veh_type, veh_contents in sec_contents.get("vehicle_types", {}).items():
+                if veh_type == section_name and "options" in veh_contents:
+                    return veh_contents["options"].get(option_name, {})
+        return {}
 
     @staticmethod
     def _hide_vertical_header(table_widget):
+        """Hides the vertical header (row count) of a table widget."""
         vertical_header = table_widget.verticalHeader()
         if vertical_header:
             vertical_header.setVisible(False)
             vertical_header.hide()
             vertical_header.setDefaultSectionSize(24)
 
-    def _build_table_tab_shell(self, section_name, section_def, headers, on_add, on_remove):
+    # STOPPED WORKING HEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEERE
+
+    def _build_table_shell(self, section_name, section_def, headers, on_add, on_remove):
         """Create common scroll container, title/description, add/remove buttons, and table."""
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
 
         content_widget = QWidget()
-        tab_layout = QVBoxLayout(content_widget)
-        tab_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        tab_layout.setContentsMargins(8, 8, 8, 8)
-        tab_layout.setSpacing(6)
+        table_page_layout = QVBoxLayout(content_widget)
+        table_page_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        table_page_layout.setContentsMargins(8, 8, 8, 8)
+        table_page_layout.setSpacing(6)
 
         label_text = section_def.get("label", section_name)
         heading_label = QLabel(f"<h2 style='margin-top: 0; margin-bottom: 0;'>{label_text}</h2>")
-        tab_layout.addWidget(heading_label)
+        table_page_layout.addWidget(heading_label)
 
         description = section_def.get("description", "")
         if description:
             description_label = QLabel(f"<small style='color: gray;'>{description}</small>")
             description_label.setWordWrap(True)
-            tab_layout.addWidget(description_label)
+            table_page_layout.addWidget(description_label)
 
         table_widget = QTableWidget()
         table_widget.setColumnCount(len(headers))
@@ -331,8 +451,8 @@ class SettingsEditorDialog(QDialog):
         button_bar_layout.addWidget(remove_entry_button)
         button_bar_layout.addStretch()
 
-        tab_layout.addLayout(button_bar_layout)
-        tab_layout.addWidget(table_widget)
+        table_page_layout.addLayout(button_bar_layout)
+        table_page_layout.addWidget(table_widget)
         scroll_area.setWidget(content_widget)
         return scroll_area, table_widget
 
@@ -342,9 +462,9 @@ class SettingsEditorDialog(QDialog):
         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         return item
 
-    def create_unified_vehicles_tab(self, section_name, section_def):
+    def create_vehicle_dynamic_map_page(self, section_name, section_def):
         """Create a table editing numbered vehicles across `<source>.vehicles` INI sections."""
-        sources = section_def.get("sources", {})
+        sources = section_def.get("vehicle_types", {})
         finite_max_keys = [s.get("max_key") for s in sources.values() if s.get("max_key") is not None]
         global_max_rows = max(finite_max_keys) if (sources and len(finite_max_keys) == len(sources)) else None
 
@@ -376,7 +496,7 @@ class SettingsEditorDialog(QDialog):
                 if vehicle_table.rowCount() > 0:
                     vehicle_table.selectRow(min(selected_row, vehicle_table.rowCount() - 1))
 
-        scroll_area, vehicle_table = self._build_table_tab_shell(
+        scroll_area, vehicle_table = self._build_table_shell(
             section_name,
             section_def,
             headers=["Number", "Name", "Type"],
@@ -392,7 +512,7 @@ class SettingsEditorDialog(QDialog):
         vehicle_table.setColumnWidth(0, 60)
         vehicle_table.setColumnWidth(2, 160)
 
-        refresh_rows = self._populate_unified_vehicles_table(vehicle_table, section_def)
+        refresh_rows = self._populate_vehicle_dynamic_map_table(vehicle_table, section_def)
         self._hide_vertical_header(vehicle_table)
         table_state["table_widget"] = vehicle_table
         table_state["refresh_rows"] = refresh_rows
@@ -401,9 +521,9 @@ class SettingsEditorDialog(QDialog):
         self.widgets_map[section_name] = ("unified_vehicles", vehicle_table)
         return scroll_area
 
-    def _populate_unified_vehicles_table(self, vehicle_table, section_def):
+    def _populate_vehicle_dynamic_map_table(self, vehicle_table, section_def):
         """Load numbered vehicle rows from `<source>.vehicles` sections and return `refresh_rows`."""
-        sources = section_def.get("sources", {})
+        sources = section_def.get("vehicle_types", {})
         label_to_key = {s_def.get("label", s_key): s_key for s_key, s_def in sources.items()}
         key_to_label = {s_key: s_def.get("label", s_key) for s_key, s_def in sources.items()}
         all_type_labels = list(label_to_key.keys())
@@ -463,7 +583,7 @@ class SettingsEditorDialog(QDialog):
 
         return refresh_rows
 
-    def create_dynamic_map_tab(self, section_name, section_def):
+    def create_dynamic_map_page(self, section_name, section_def):
         """Create a key/value table tab for dynamic map sections such as `video_streams`."""
         key_range = section_def.get("key_range")
         table_state = {}
@@ -513,7 +633,7 @@ class SettingsEditorDialog(QDialog):
                 if map_table.rowCount() > 0:
                     map_table.selectRow(min(selected_row, map_table.rowCount() - 1))
 
-        scroll_area, map_table = self._build_table_tab_shell(
+        scroll_area, map_table = self._build_table_shell(
             section_name,
             section_def,
             headers=["Key", "Value"],
@@ -551,10 +671,10 @@ class SettingsEditorDialog(QDialog):
 
     def _populate_config_from_ui(self):
         """Write current UI values into `self.config`."""
-        for key_info, (kind, target_widget) in self.widgets_map.items():
-            if kind == "unified_vehicles" and isinstance(target_widget, QTableWidget):
+        for key_info, (config_section_type, target_widget) in self.widgets_map.items():
+            if config_section_type == "unified_vehicles" and isinstance(target_widget, QTableWidget):
                 sec_def = self._table_schemas.get(key_info, {})
-                sources = sec_def.get("sources", {})
+                sources = sec_def.get("vehicle_types", {})
                 label_to_key = {s_def.get("label", s_key): s_key for s_key, s_def in sources.items()}
 
                 # Reset each `<source>.vehicles` section once so removed entries are cleared
@@ -575,7 +695,7 @@ class SettingsEditorDialog(QDialog):
                     if s_key:
                         self.config.set(f"{s_key}.vehicles", key_item.text().strip(), name_item.text().strip())
 
-            elif kind == "dynamic_map" and isinstance(target_widget, QTableWidget):
+            elif config_section_type == "dynamic_map" and isinstance(target_widget, QTableWidget):
                 section_name = key_info
                 if self.config.has_section(section_name):
                     self.config.remove_section(section_name)
@@ -592,31 +712,31 @@ class SettingsEditorDialog(QDialog):
                         )
 
             else:
-                section_name, opt_key = key_info
+                section_name, option_name = key_info
                 if not self.config.has_section(section_name):
                     self.config.add_section(section_name)
-                self.config.set(section_name, opt_key, self._get_widget_value(kind, target_widget))
+                self.config.set(section_name, option_name, self._get_widget_value(config_section_type, target_widget))
 
     def _refresh_ui_from_config(self):
         """Reload all widgets from `self.config` (falling back to schema defaults)."""
-        for key_info, (kind, target_widget) in self.widgets_map.items():
-            if kind == "unified_vehicles" and isinstance(target_widget, QTableWidget):
-                self._populate_unified_vehicles_table(target_widget, self._table_schemas.get(key_info, {}))
+        for key_info, (config_section_type, target_widget) in self.widgets_map.items():
+            if config_section_type == "unified_vehicles" and isinstance(target_widget, QTableWidget):
+                self._populate_vehicle_dynamic_map_table(target_widget, self._table_schemas.get(key_info, {}))
                 self._hide_vertical_header(target_widget)
-            elif kind == "dynamic_map" and isinstance(target_widget, QTableWidget):
+            elif config_section_type == "dynamic_map" and isinstance(target_widget, QTableWidget):
                 self._populate_dynamic_map_table(target_widget, key_info, self._table_schemas.get(key_info, {}))
                 self._hide_vertical_header(target_widget)
             else:
-                section_name, opt_key = key_info
-                opt_def = self._find_option_def(section_name, opt_key)
-                value = self._get_config_or_default(section_name, opt_key, opt_def)
-                self._set_widget_value(kind, opt_def, target_widget, value)
+                section_name, option_name = key_info
+                option_contents = self._find_option_def(section_name, option_name)
+                value = self._get_val_from_config(section_name, option_name, option_contents)
+                self._set_widget_value(config_section_type, option_contents, target_widget, value)
 
     def _load_defaults_into_ui(self):
         """Reset all widgets to their schema default values without writing to disk."""
-        for key_info, (kind, target_widget) in self.widgets_map.items():
-            if kind == "unified_vehicles" and isinstance(target_widget, QTableWidget):
-                sources = self._table_schemas.get(key_info, {}).get("sources", {})
+        for key_info, (config_section_type, target_widget) in self.widgets_map.items():
+            if config_section_type == "unified_vehicles" and isinstance(target_widget, QTableWidget):
+                sources = self._table_schemas.get(key_info, {}).get("vehicle_types", {})
                 key_to_label = {s_key: s_def.get("label", s_key) for s_key, s_def in sources.items()}
                 default_type = key_to_label.get(next(iter(sources.keys())), "") if sources else ""
 
@@ -631,7 +751,7 @@ class SettingsEditorDialog(QDialog):
                 target_widget.setCellWidget(0, 2, type_combo_box)
                 self._hide_vertical_header(target_widget)
 
-            elif kind == "dynamic_map" and isinstance(target_widget, QTableWidget):
+            elif config_section_type == "dynamic_map" and isinstance(target_widget, QTableWidget):
                 sec_def = self._table_schemas.get(key_info, {})
                 has_key_range = "key_range" in sec_def
                 target_widget.setRowCount(1)
@@ -641,9 +761,9 @@ class SettingsEditorDialog(QDialog):
                 self._hide_vertical_header(target_widget)
 
             else:
-                section_name, opt_key = key_info
-                opt_def = self._find_option_def(section_name, opt_key)
-                self._set_widget_value(kind, opt_def, target_widget, opt_def.get("default"))
+                section_name, option_name = key_info
+                option_contents = self._find_option_def(section_name, option_name)
+                self._set_widget_value(config_section_type, option_contents, target_widget, option_contents.get("default"))
 
     def _save_config_to_path(self, file_path):
         """Sync UI state into `self.config` and write it to `file_path`."""
@@ -670,7 +790,7 @@ class SettingsEditorDialog(QDialog):
         self.restart_requested = reply == QMessageBox.StandardButton.Yes
         self.accept()
 
-    def on_save_as(self):
+    def on_export(self):
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Settings",
