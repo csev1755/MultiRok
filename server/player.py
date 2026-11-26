@@ -1,7 +1,5 @@
 import time
 
-from devices.vehicle import Vehicle
-
 
 class Player:
     """
@@ -17,7 +15,7 @@ class Player:
     """
 
     def __init__(self, player_id):
-        self.selected_vehicle: Vehicle | None = None
+        self.selected_vehicle = None
         self.player_name = None
         self.active = False
         self.player_id = player_id

@@ -83,8 +83,6 @@ class PlayManager:
         Returns:
             Player or None: The released Player object.
         """
-        if not isinstance(player_id, int) or player_id < 0 or player_id >= len(self.players):
-            return None
         player = self.players[player_id]
         if not player.active:
             return None
@@ -95,7 +93,7 @@ class PlayManager:
         player.selected_vehicle = None
         player.buttons.clear()
         if old_vehicle:
-            self._update_vehicle_controls(old_vehicle)
+            self.update_vehicle_controls(old_vehicle)
             old_vehicle.control()
         self.logger.info(f"Released Player object {player.player_id}")
         return player
@@ -108,15 +106,12 @@ class PlayManager:
             player (Player): The player issuing commands.
             input (dict): A dictionary containing a button and pressed state.
         """
-        if not player.active or not isinstance(input.get("button"), str) or not isinstance(input.get("pressed"), bool):
-            return
-
         old_vehicle = player.selected_vehicle
         button = input["button"]
         if input["pressed"]:
             if button in ("SELECT_UP", "SELECT_DOWN"):
                 delta = 1 if button == "SELECT_UP" else -1
-                player.selected_vehicle = self._cycle_vehicle_selection(player, delta)
+                player.selected_vehicle = self.cycle_vehicle_selection(player, delta)
             player.buttons.add(button)
         else:
             player.buttons.discard(button)
@@ -125,22 +120,32 @@ class PlayManager:
 
         affected_vehicles = {vehicle for vehicle in (old_vehicle, player.selected_vehicle) if vehicle is not None}
         for vehicle in affected_vehicles:
-            self._update_vehicle_controls(vehicle)
+            self.update_vehicle_controls(vehicle)
 
         if player.selected_vehicle:
             player.last_activity = time.time()
         for vehicle in affected_vehicles:
             vehicle.control()
 
-    def _cycle_vehicle_selection(self, player, delta):
+    def cycle_vehicle_selection(self, player, delta):
+        """
+        Cycle a player's vehicle selection while respecting occupied vehicles.
+
+        Args:
+            player (Player): The player changing their selection.
+            delta (int): Direction to cycle, either 1 or -1.
+
+        Returns:
+            Vehicle or None: The selected vehicle, or None to clear the selection.
+        """
         for connected_player in self.players:
-            self._expire_selection(connected_player)
+            self.expire_selection(connected_player)
 
         current_selection = player.selection or 0
         occupied_selections = {
-            other.selection
-            for other in self.players
-            if other.active and other is not player and other.selection is not None
+            other_player.selection
+            for other_player in self.players
+            if other_player.active and other_player is not player and other_player.selection is not None
         }
 
         for _ in range(self.vehicle_count):
@@ -153,12 +158,24 @@ class PlayManager:
 
         return player.selected_vehicle
 
-    def _update_vehicle_controls(self, vehicle):
+    def update_vehicle_controls(self, vehicle):
+        """
+        Recompute a vehicle's active players and combined controls.
+
+        Args:
+            vehicle (Vehicle): The vehicle to update.
+        """
         players = [player for player in self.players if player.active and player.selected_vehicle is vehicle]
         vehicle.player_ids = {player.player_id for player in players}
         vehicle.controls = {button for player in players for button in player.buttons}
 
-    def _expire_selection(self, player):
+    def expire_selection(self, player):
+        """
+        Clear a player's vehicle selection if they have been inactive too long.
+
+        Args:
+            player (Player): The player whose selection may expire.
+        """
         if (
             player.active
             and player.selected_vehicle
@@ -167,7 +184,7 @@ class PlayManager:
             old_vehicle = player.selected_vehicle
             player.selected_vehicle = None
             player.buttons.clear()
-            self._update_vehicle_controls(old_vehicle)
+            self.update_vehicle_controls(old_vehicle)
             old_vehicle.control()
 
     def get_player_info(self):
@@ -180,7 +197,7 @@ class PlayManager:
         players = []
 
         for player in self.players:
-            self._expire_selection(player)
+            self.expire_selection(player)
             if player.active:
                 players.append(
                     {
