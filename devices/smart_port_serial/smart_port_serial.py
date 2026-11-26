@@ -64,7 +64,7 @@ class SmartPortSerial(Vehicle):
                     [
                         253,
                         int(self.play_manager.allow_share),
-                        int(sum(1 for v in self.play_manager.vehicles.values() if v.type == self.type) > 8),
+                        int(sum(1 for v in self.play_manager.vehicles if v.type == self.type) > 8),
                         int(self.config.getboolean("enable_wifi")),
                         0,  # Reserved for future use.
                         255,
@@ -80,49 +80,50 @@ class SmartPortSerial(Vehicle):
             self.logger.error(f"Cannot connect to Smart Port serial device at '{self.config['serial_port']}'")
             SmartPortSerial.serial = None
 
-    def encode_player_state(self, player):
+    def encode_controls(self, controls):
         """
-        Encodes player button states into two bytes for serial transmission.
+        Encodes vehicle controls into two bytes for serial transmission.
 
         Byte 1: D-pad directions (up, down, right, left)
         Byte 2: Action buttons (A, B, X, Y) and triggers
 
         Args:
-            player (Player): A player object.
+            controls (set[str]): Active controls for this vehicle.
 
         Returns:
             tuple[int, int]: Two bytes representing the player state.
         """
-        up = "DPAD_UP" in player.buttons
-        down = "DPAD_DOWN" in player.buttons
-        right = "DPAD_RIGHT" in player.buttons
-        left = "DPAD_LEFT" in player.buttons
+        up = "DPAD_UP" in controls
+        down = "DPAD_DOWN" in controls
+        right = "DPAD_RIGHT" in controls
+        left = "DPAD_LEFT" in controls
 
-        b_a = "A_BUTTON" in player.buttons
-        b_b = "B_BUTTON" in player.buttons
-        b_x = "X_BUTTON" in player.buttons
-        b_y = "Y_BUTTON" in player.buttons
+        b_a = "A_BUTTON" in controls
+        b_b = "B_BUTTON" in controls
+        b_x = "X_BUTTON" in controls
+        b_y = "Y_BUTTON" in controls
 
-        b_rt = int("LEFT_TRIGGER" in player.buttons or "RIGHT_TRIGGER" in player.buttons)
+        b_rt = int("LEFT_TRIGGER" in controls or "RIGHT_TRIGGER" in controls)
 
         byte1 = (up << 3) | (down << 2) | (right << 1) | left
         byte2 = (b_a << 4) | (b_b << 3) | (b_x << 2) | (b_y << 1) | b_rt
 
         return byte1, byte2
 
-    def control(self, player, play_manager):
+    def control(self):
         """
-        Constructs and transmits a packet containing the state of all players
-        to the serial device and receives data representing the command deck's state.
+        Constructs and transmits a packet containing active controls for this device.
         """
         available_controllers = 12 - SmartPortSerial.sp_player_ids.count(1)
         packet = bytearray([254])
-        for p in play_manager.players.values():
-            if p.socket_id and available_controllers and p.selection and play_manager.get_vehicle_from_id(p.selection).type == self.type:
-                p_id = p.player_id + 1 or 0
-                v_sel = p.selection - 1
-                byte1, byte2 = self.encode_player_state(p) if p.selection is not None else (0, 0)
-                packet.extend([p_id, v_sel, byte1, byte2])
+        for vehicle in self.play_manager.vehicles:
+            if vehicle.type != self.type:
+                continue
+            byte1, byte2 = self.encode_controls(vehicle.controls)
+            for player_id in sorted(vehicle.player_ids):
+                if not available_controllers:
+                    break
+                packet.extend([player_id + 1, vehicle.id - 1, byte1, byte2])
                 available_controllers -= 1
         packet.append(255)
         self.send_and_receive_packet(packet)
